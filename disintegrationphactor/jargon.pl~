@@ -1,0 +1,400 @@
+#!/usr/local/bin/perl5 -w -I../Solaris/Audio/blib/lib -I../Solaris/Audio/blib/arch
+use Solaris::Audio qw(:all);
+
+#
+# "Jargon"
+# hack: 1. n. Originally, a quick job that produces what is needed, but
+# not well. 2. n. An incredibly good, and perhaps very time-consuming, piece
+# of work that produces exactly what is needed. [...]
+# (From http://www.tuxedo.org/~esr/jargon/)
+#
+
+$frame = shift || 0;
+$direct = 1;
+$port = 2;
+$rate = 16000;
+$s = $rate; # one second
+$b = ($s * 60) / 240; # one beat
+$m = $b * 4; # one measure
+
+audio_init($direct) or die "Couldn't open audio";
+if ($direct) {
+audio_set_port($port);
+audio_set_rate($rate);
+audio_set_gain(80);
+}
+
+$freq = 440;
+$mult = 2 ** (1/12);
+for('A'..'G') {
+  $_ eq "C" and $freq /= 2;
+  $tone{$_} = $freq;
+  $freq *= $mult;
+  next if $_ eq "B";
+  next if $_ eq "E";
+  $freq *= $mult;
+}
+sub tone_of_string {
+my $mymult = 1;
+my ($st) = @_;
+for ($st) {
+  while (s/b//) {$mymult /= $mult}
+  while (s/\#//) {$mymult *= $mult}
+  while(s/\+//) {$mymult *= 2}
+  while(s/\-//) {$mymult /= 2}
+}
+return $tone{$st} * $mymult;
+}
+
+
+
+#$bass = " " x ($rate * 2);
+#$snare = " " x ($rate * 2);
+#$sh_snare = " " x ($rate * 2);
+#$tick = " " x ($rate * 2);
+#$sintbl = " " x ($rate * 2);
+#$tontbl = " " x ($rate * 2);
+#$sound = " " x ((4 * $m + $s)* 2);
+#$riff = " " x (($m / 2) * 2);
+#$tmp = " " x ($s * 2);
+audio_zero($sound, 4 * $m + $s);
+#audio_zero($riff, $m/2);
+
+audio_zero($sintbl, $s);
+audio_osc_add($sintbl, $s, 1, 32000);
+audio_zero($tontbl, $s);
+audio_osc_add($tontbl, $s, 1, 16000);
+audio_osc_add($tontbl, $s, 3, 16000);
+
+audio_zero($bass, $s);
+audio_omni_drum($bass, $s, $sintbl, $s, 12, 30, 0.5, 1);
+audio_scale($bass, $s, 20);
+audio_linear_env($bass, 0, 1.0, $s, 0);
+
+audio_zero($snare, $s);
+audio_zero($sh_snare, $s);
+
+audio_zero($tmp, $s);
+audio_noise($tmp, $s/4);
+audio_linear_env($tmp, 0, 1, 3 * $s/16, 0);
+audio_omni_drum($snare, 3 * $s/16, $sintbl, $s,  90, 30, 1, 1);
+audio_linear_env($snare, 0, 1, 3 * $s / 16, 0);
+audio_add($snare, 0, $tmp, 3 * $s /16);
+
+audio_zero($tmp, $s);
+audio_noise($tmp, $s/4);
+audio_linear_env($tmp, 0, 1, $s/8, 0);
+audio_omni_drum($sh_snare, $s/8, $sintbl, $s,  90, 30, 1, 1);
+audio_linear_env($sh_snare, 0, 1, $s /8, 0);
+audio_add($sh_snare, 0, $tmp, $s /8);
+
+audio_zero($tick, $s);
+audio_noise($tick, $s/8);
+audio_linear_env($tick, 0, 1, $s/8, 0);
+
+$loud_bass = $bass;
+audio_scale($loud_bass, $s, 3/4);
+audio_scale($bass, $s, 2/3);
+audio_scale($snare, $s, 1/8);
+audio_scale($sh_snare, $s, 1/8);
+audio_scale($tick, $s, 1/4);
+
+
+audio_flat($saw_unit, $m / 8, 32000);
+audio_linear_env($saw_unit, 0, 1, 3 * $m/64, .25);
+audio_linear_env($saw_unit, 3*$m/64, .25, $m/8, 0);
+audio_zero($saw, 4 * $m);
+audio_table_add($saw, 4 * $m, $saw_unit, $m / 8, 1, 1);
+
+$| = 1;
+
+
+@harmonics = (
+	      [ 1,  0, 1, 1, .5,  1, .5,  1],
+	      [.5,  1, 0, 0,  0,  0,  0,  0],
+              [ 0,  1, 1, 1,  1, .5,  0,  0],
+	      [ 1,  0, 1, 0,  1,  0,  1,  0],
+	      [ 0,  0, 0, 1,  1,  1,  0,  0],
+	      [ 1,  0, 0, 0,  0,  1,  0,  0],
+	      [ 1,  .5, .25, .125,  .0625,  0,  0,  0],
+	      [ 1,  0, .25, 0,  .0625,  0,  0,  0],
+	      [ 1,  0, 1, 1, .5,  1, .5,  1],
+	     );
+
+sub get_harmonics {
+  my ($t) = @_;
+# print "$t\n";
+  $t = fmod($t, 8);
+  my $f = $t - int $t;
+  map 
+    {(1-$f) * $harmonics[int $t][$_] + ($f) * $harmonics[int $t+1][$_]}
+  (0..$#{$harmonics[int $t]});
+}
+
+sub fmod {
+my ($a, $b) = @_;
+$b * ($a / $b - int($a / $b));
+}
+
+#############
+for $c_frame ($frame..41) {
+  my $sound_tmp = $sound;
+  audio_zero($sound_tmp, 4 * $m);
+
+  if ($c_frame < 36) {
+    for $t (0..3) {
+      $i = 0;
+      
+      for (qw(C-- Eb-- Eb- . E-- . Bb- Bb--)) {
+	my $pos =  $c_frame / 4 + $t / 8;
+	#      my @harm = get_harmonics ( $i % 2 ? fmod((1 + $pos), 8) : $pos);
+	my @harm = get_harmonics ($pos);
+	$_ ne "." and
+	  note($sound_tmp, ($t * $m) + $i * $m/8, $_,  $m / 8, 1000, [@harm]);
+	$i++;
+      }
+    }
+  }
+  if ($c_frame >= 2 && $c_frame < 41) {
+    my $sound_tmp2;
+    audio_zero($sound_tmp2, $m * 4);
+
+    if ($c_frame % 2 == 0) {
+      my $length = .25;
+      my $phaser;
+      my $phasee;
+
+      audio_zero($phasee, $m * $length);
+      audio_flat($phaser, $m * $length, 16000);
+      audio_linear_env($phaser, 0, 0, $m * $length, 1);
+      audio_distort($phaser, $m * $length, 0, tone_of_string("C+"), 16000, tone_of_string("Bb"));
+      audio_phase($phasee, $m * $length, $tontbl, $s, $phaser, $m * $length, 1, 1);
+      audio_scale($phasee, $m * $length, 1/2);
+      audio_add($sound_tmp2, (4 - $length) * $m, $phasee, $m * $length);
+      background($sound_tmp2, 0, "C+", (4 - $length) * $m, 4000);
+    }
+    else {
+      background($sound_tmp2, 0, "Bb", 4 * $m, 4000);
+    } 
+
+    audio_table_env($sound_tmp2, 4 * $m, $saw, 4 * $m);
+    audio_add($sound_tmp, 0, $sound_tmp2, 4 * $m);
+  }
+
+
+  # drums
+  if ($c_frame < 36) {
+    if ($c_frame >= 4) {
+      for (0..3) {
+	#      audio_add($sound_tmp, $_ * $m, $bass, $s); 
+	audio_add($sound_tmp, $_ * $m + $m/8, $snare, 3 * $s/16);
+	audio_add($sound_tmp, $_ * $m + 2 * $m/8, $sh_snare, $s/8); 
+	#      audio_add($sound_tmp, $_ * $m + 3 * $m/8, $snare, 3 * $s/16);
+	audio_add($sound_tmp, $_ * $m + 4 * $m/8, $tick, 3 * $s/16);
+	#      audio_add($sound_tmp, $_ * $m + 5 * $m/8, $sh_snare, 3 * $s/16);
+	#      audio_add($sound_tmp, $_ * $m + 6 * $m/8, $tick, 3 * $s/16);
+	#      audio_add($sound_tmp, $_ * $m + 7 * $m/8, $tick, 3 * $s/16);
+      }
+    }
+    
+    if ($c_frame >= 6) {
+      for (0..3) {
+	audio_add($sound_tmp, $_ * $m, $bass, $s); 
+	#     audio_add($sound_tmp, $_ * $m + $m/8, $snare, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 2 * $m/8, $sh_snare, $s/8); 
+	#     audio_add($sound_tmp, $_ * $m + 3 * $m/8, $snare, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 4 * $m/8, $tick, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 5 * $m/8, $sh_snare, 3 * $s/16);
+	audio_add($sound_tmp, $_ * $m + 6 * $m/8, $tick, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 7 * $m/8, $tick, 3 * $s/16);
+      }
+    }
+    if ($c_frame >= 8) {
+      for (0..3) {
+	#     audio_add($sound_tmp, $_ * $m, $bass, $s); 
+	#     audio_add($sound_tmp, $_ * $m + $m/8, $snare, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 2 * $m/8, $sh_snare, $s/8); 
+	audio_add($sound_tmp, $_ * $m + 3 * $m/8, $snare, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 4 * $m/8, $tick, 3 * $s/16);
+	audio_add($sound_tmp, $_ * $m + 5 * $m/8, $sh_snare, 3 * $s/16);
+	#     audio_add($sound_tmp, $_ * $m + 6 * $m/8, $tick, 3 * $s/16);
+	audio_add($sound_tmp, $_ * $m + 7 * $m/8, $tick, 3 * $s/16);
+      }
+    }
+    if ($c_frame >= 10) {
+      for (0..3) {
+	#      audio_add($sound_tmp, $_ * $m + 3 * $m/8, $bass, $s/8); 
+	audio_add($sound_tmp, $_ * $m + 4 * $m/8, $bass, 3 * $s/16);
+	audio_add($sound_tmp, $_ * $m + 6 * $m/8, $loud_bass, 3 * $s/16);
+	
+      }
+    }
+  }
+
+  if ($c_frame < 22 || $c_frame >= 32) {
+    if ($c_frame < 22) {
+      $chordal_func = \&chordal_note;
+    } 
+    else {
+      $chordal_func = \&strong_chordal_note;
+    }
+    if ($c_frame >= 14) {
+      my ($i, $j, $amp);
+      local @melody = qw(Eb+ C+ Bb C+);
+      for $i (0..1) {
+	$amp = 1;
+	for $j (0..7) {
+	  &{$chordal_func}($sound_tmp, $i * $m * 2 + $j * 3 * $m / 16, 
+		       @melody[(2 * $c_frame + $i) % 4]
+		       , 3 * $m / 32, $amp);
+	  $amp = $amp * .75;
+	}
+      }
+    }
+
+    if ($c_frame >= 16) {
+      my ($i, $j, $amp);
+      local @melody = qw(C+ G F Bb);
+      for $i (0..1) {
+	$amp = 1;
+	for $j (0..7) {
+	  &{$chordal_func}($sound_tmp, $i * $m * 2 + $j * 3 * $m / 16, 
+		       @melody[(2 * $c_frame + $i) % 4]
+		       , $m / 8, $amp);
+	  $amp = $amp * .75;
+	}
+      }
+    }
+        
+    if ($c_frame >= 18) {
+      my ($i, $j, $amp);
+      local @melody = qw(Eb C D F);
+      for $i (0..1) {
+	$amp = 1;
+	for $j (0..7) {
+	  &{$chordal_func}($sound_tmp, $i * $m * 2 + $j * 3 * $m / 16, 
+		       @melody[(2 * $c_frame + $i) % 4]
+		       , $m / 8, $amp);
+	  $amp = $amp * .75;
+	}
+      }
+    }
+    
+    if ($c_frame >= 20) {
+      my ($i, $j, $amp);
+      local @melody = qw(C Eb C Eb);
+      for $i (0..1) {
+	$amp = 1;
+	for $j (0..7) {
+	  &{$chordal_func}($sound_tmp, $i * $m * 2 + $j * 3 * $m / 16, 
+		       @melody[(2 * $c_frame + $i) % 4]
+		       , $m / 8, $amp);
+	  $amp = $amp * .75;
+	}
+      }
+    }
+  }
+
+  if ($c_frame >= 24 && $c_frame < 40) {
+    for $t (0..3) {
+      $i = 0;
+      @walk = qw(C- D- Eb- F- Gb- F- Ab-- Bb--);
+      if ($t % 2) {
+	@melody = split(/\s+/, 'F- F F#- . Bb . Bb-')
+      }
+      else {
+	@melody = qw(Eb- Eb . E- . Bb Bb-);
+      }
+      @melody = ($walk[$t + 4 * ($c_frame % 2)], @melody);
+      for (@melody) {
+	my $pos =  $c_frame / 4 + $t / 8;
+	my @harm = get_harmonics ( fmod((3 + $pos), 8) );
+	$_ ne "." and
+	  note($sound_tmp, ($t * $m) + $i * $m/8, $_,  $m / 8, 1000, [@harm]);
+	$i++;
+      }
+    }
+  }
+  if ($c_frame == 41) {
+    audio_linear_env($sound_tmp,  2 * $m, 1, 4 * $m, 0);
+  }
+  if ($frame <= $c_frame) {
+    audio_play($sound_tmp, 4 * $m);
+  }
+}
+
+
+audio_destroy(); 
+
+sub note {
+  my ($off, $which, $dur, $amp, $harm); 
+  (undef, $off, $which, $dur, $amp, $harm) = @_;
+  my $tmp = " " x (2 * $dur);
+  $amp =  $amp || 1600;
+  audio_zero($tmp, $dur);
+  my $h = 0;
+  foreach(@$harm) {
+    $h++;
+    audio_osc_add($tmp, $dur, $h * tone_of_string($which), $_ * $amp);
+  }
+  audio_linear_env($tmp, 0, 0, $dur / 8 , 1);
+  audio_linear_env($tmp, $dur / 8, 1, $dur / 4, 7/8);
+  audio_linear_env($tmp, $dur / 4, 7/8, 3 * $dur / 8, 1/4);
+  audio_linear_env($tmp, 3 * $dur / 8, 1/4, $dur, 0);
+  audio_scale($tmp, $dur, 20);
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+sub chordal_note {
+  my ($off, $which, $dur, $amp, $harm); 
+  (undef, $off, $which, $dur, $amp, $harm) = @_;
+  my $tmp = " " x (2 * $dur);
+  $amp =  3200 * $amp;
+  audio_zero($tmp, $dur);
+  my $h = 0;
+  foreach(qw(.25 1 .25 .25 .25)) {
+    $h++;
+    audio_osc_add($tmp, $dur, $h * tone_of_string($which), $_ * $amp);
+  }
+  audio_linear_env($tmp, 0, 0, $dur / 32  , 1);
+  audio_linear_env($tmp, $dur / 32, 1, $dur, 0);
+  audio_scale($tmp, $dur, 2);
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+sub strong_chordal_note {
+  my ($off, $which, $dur, $amp, $harm); 
+  (undef, $off, $which, $dur, $amp, $harm) = @_;
+  my $tmp = " " x (2 * $dur);
+  $amp =  3200 * $amp;
+  audio_zero($tmp, $dur);
+  my $h = 0;
+  foreach(qw(1 0 1 1)) {
+    $h++;
+    audio_osc_add($tmp, $dur, $h * tone_of_string($which), $_ * $amp);
+  }
+  audio_linear_env($tmp, 0, 0, $dur / 32  , 1);
+  audio_linear_env($tmp, 31 * $dur / 32, 1, $dur, 0);
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+sub background {
+  my ($off, $which, $dur, $amp); 
+  (undef, $off, $which, $dur, $amp) = @_;
+  _background($_[0], $off, tone_of_string($which), $dur, $amp, [1, 0, 1]);
+}
+
+sub _background {
+  my ($off, $which, $dur, $amp, $harm); 
+  (undef, $off, $which, $dur, $amp, $harm) = @_;
+  my $tmp = " " x (2 * $dur);
+  $amp =  $amp || 1600;
+  audio_zero($tmp, $dur);
+  my $h = 0;
+  foreach(@$harm) {
+    $h++;
+    audio_osc_add($tmp, $dur, $h * $which, $_ * $amp);
+  }
+
+  audio_add($_[0], $off, $tmp, $dur);
+}

@@ -1,0 +1,37 @@
+#include <stdio.h>
+#include <math.h>
+
+#define RATE 16000.0
+#define DUR  5.0
+#define FREQ 110.0
+
+int main() {
+  FILE *in, *out;
+  short 
+    buffer[(int)(RATE * DUR)],
+    sample[(int)(RATE * DUR)];
+  int i;
+  double f, df, a, b;
+
+  in = fopen("sound.sw", "r");
+  if (!in) { perror ("Opening input file"); exit(1); }
+  fread(sample, sizeof(short), (int)(RATE * DUR), in);
+  out = fopen("audio.out", "w");
+  if (!out) { perror("Opening output file"); exit(1); }
+  f = 0.0;
+  df = 0.0;
+  a = 100.0;
+  b = 4.0 * M_PI * M_PI * FREQ * FREQ;
+  for(i = 0; i < (int)(RATE * DUR); i++) {
+    df -= (1/RATE) * (a * df + b * f);
+    df +=  50.0 * sample[i];
+    /* printf("%i ", sample[i]);*/
+    /*fflush(stdout);*/
+    f  += (1/RATE) * df;
+    if (f > 32000.0) f = 32000.0;
+    if (f < -32000.0) f = -32000.0;
+    buffer[i] = (short)f;
+
+  }
+  fwrite(buffer, sizeof(short), (int)(RATE * DUR), out);
+}

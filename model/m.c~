@@ -1,0 +1,106 @@
+#include <stdio.h>
+#include <fcntl.h>
+#include <gd.h>
+#include <math.h>
+
+#define MAX_L 1.0 /* m */
+#define NUM_PTS 50
+#define DL (MAX_L / (double)NUM_PTS) /* m */
+#define C 50.0 /* m / s */
+#define BETA -100.0 /* ?? */
+#define DT 0.0000625 /* s */
+#define MAX_T 0.5 /* s */
+
+typedef double pt;
+
+pt wire_r[NUM_PTS];    
+pt wire_l[NUM_PTS];
+
+#define HEIGHT 50
+
+gdImagePtr im;
+
+void snapshot_init() {
+  int i;
+
+  im = gdImageCreate(NUM_PTS, HEIGHT);
+  /*
+  for (i = 0; i < 256; i++) {
+    gdImageColorAllocate(im, 255-i, 255-i, 255-i);
+  }
+  */
+  gdImageColorAllocate(im, 255, 255, 255);
+  gdImageColorAllocate(im, 0, 0, 0);
+  gdImageColorAllocate(im, 255, 0, 255);
+}
+
+void snapshot_update (pt wire[NUM_PTS]) {
+  int i;
+  
+  for (i = 0; i < NUM_PTS; i++) {
+    gdImageSetPixel(im,  i, ((1. - wire[i]) / 2.) * HEIGHT, 1);
+  }
+}
+
+void snapshot_write() {
+  FILE *out;
+
+  out = fopen("m.gif", "wb");
+  if (!out) { perror("Opening output file"); exit(1); }
+  gdImageGif(im, out);
+  fclose(out);
+}
+
+int main(void) {
+
+  int i;
+  double t, L;
+  int fd;
+  int ll = 0, rr = 0;
+
+  unlink("audio.out");
+  fd = open("audio.out", O_CREAT | O_RDWR, 0644);
+  if (fd == -1) {
+    printf("Couldn't open audio file\n");
+    exit(1);
+  }
+  srand();
+  snapshot_init();
+
+  for(i=0; i<NUM_PTS; i++) {
+    double val;
+    val = (rand() % 4) / 1.0;
+    wire_l[i] = wire_r[i] = 0.10 * val;
+  }
+
+  for(t = 0; t < MAX_T; t += DT) {
+    pt ol = wire_l[ll]*-0.099 + wire_l[(ll+1)%NUM_PTS]*-0.9, 
+      or = wire_r[rr]*0.099 + wire_r[(rr+NUM_PTS-1)%NUM_PTS]*0.35 + wire_r[(rr+NUM_PTS-2)%NUM_PTS]*0.55 ;
+    if (0) {
+      pt real_wire[NUM_PTS];
+      for(i = 0; i<NUM_PTS; i++) {
+	real_wire[i] = (wire_l[(ll + i) % NUM_PTS] + wire_r[(NUM_PTS + rr + i - 1) % NUM_PTS]) / 2;
+      }
+      printf("writing\n");
+      snapshot_update(real_wire);
+      snapshot_write();
+      exit(0);
+    }
+    {
+      /*      short frame = (short)(16000 * (wire_l[(ll + NUM_PTS / 2) % NUM_PTS] + wire_r[(NUM_PTS + NUM_PTS / 2 + rr - 1) % NUM_PTS]));*/
+     short frame = (short)(8000 * (wire_l[(ll + NUM_PTS / 2) % NUM_PTS]+wire_l[(ll +  NUM_PTS / 3) % NUM_PTS]
+				    +wire_l[(ll +  NUM_PTS / 4) % NUM_PTS]+wire_l[(ll +  NUM_PTS / 9) % NUM_PTS] ));
+      write(fd, &frame, sizeof(short));
+    }
+    wire_l[ll] = or;
+    wire_r[rr] = ol;
+    if (t > MAX_T / 6.0 && (rand() % 3)) {
+      wire_r[rr] *= 0.9;
+    }
+    if (rand()%30)
+      ll = (ll + 1) % NUM_PTS;
+    rr = (rr + NUM_PTS - 1) % NUM_PTS;
+  }
+}
+
+

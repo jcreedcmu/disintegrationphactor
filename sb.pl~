@@ -1,0 +1,16 @@
+#!/usr/bin/perl5
+
+use Tk;
+
+$mw = MainWindow->new();
+$t = $mw->Scrolled("Text", -scrollbars => "oeos")->pack();
+$e = $mw->Scrolled("Text", -scrollbars => "oeos")->pack();
+$b = $mw->Button(-text => "Eval", -command => 
+		 sub {
+		   eval $t->get("1.0", "end");
+		   my $error = $@;
+		   $e->delete("1.0", "end");
+		   $e->insert("end", $error);
+		 }
+);
+		   

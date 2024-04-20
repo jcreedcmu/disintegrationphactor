@@ -1,0 +1,643 @@
+#!/usr/local/bin/perl5 -w -I../Solaris/Audio/blib/lib -I../Solaris/Audio/blib/arch
+use Solaris::Audio qw(:all);
+
+#
+# Toaster OS
+#
+# It's everything you need in a
+# bread/pastry/waffle defrosting/toasting/warming
+# system! Multiprocessing! Multithreading!
+# Supports SMP! SMB! VFS! TCP!
+# Modern Microkernel architecture!
+# and...
+# An adjustable darkness knob!
+#
+
+$frame = shift || 0;
+$direct = 0;
+$port = 2;
+$rate = 16000;
+$s = $rate; # one second
+$b = ($s * 60) / 120; # one beat
+$m = $b * 4; # one measure
+
+audio_init($direct) or die "Couldn't open audio";
+if ($direct) {
+audio_set_port($port);
+audio_set_rate($rate);
+audio_set_gain(80);
+}
+
+require "disi.pl";
+
+# This stuff shouldn't be
+# necessary with the new lib
+
+#$bass = " " x ($rate * 2);
+#$deep = " " x ($rate * 2);
+#$snare = " " x ($rate * 2);
+#$sh_snare = " " x ($rate * 2);
+#$tick = " " x ($rate * 2);
+#$sintbl = " " x ($rate * 2);
+#$sound = " " x ((2 * $m + $s)* 2);
+#$riff = " " x (($m / 2) * 2);
+#$tmp = " " x ($s * 2);
+
+audio_zero($sound, $m + $s);
+audio_zero($riff, $m/2);
+
+audio_zero($sintbl, $s);
+
+audio_osc_add($sintbl, $s, 1, 32000);
+
+audio_zero($bass, $s);
+audio_omni_drum($bass, $s, $sintbl, $s, 12, 30, 0.5, 1);
+audio_scale($bass, $s, 20);
+audio_linear_env($bass, 0, 1.0, $s, 0);
+
+sub make_deep {
+audio_zero($deep, $s);
+audio_table_add($deep, $s/2 , $sintbl, $s, tone_of_string($_[0]), .25);
+audio_linear_env($deep, 0, 1, $s/2 , 0);
+audio_distort($deep, $s/2 , 500, 500, 33000, 500);
+my $deep_save = $deep;
+audio_zero($deep, $s);
+audio_table_add($deep, $s/2 , $sintbl, $s, tone_of_string($_[1]), .25);
+audio_linear_env($deep, 0, 1, $s/2 , 0);
+audio_distort($deep, $s/2 , 500, 500, 33000, 500);
+audio_add($deep, 0, $deep_save, $s);
+}
+make_deep("C", "G-");
+$deep_1 = $deep;
+make_deep("C", "F-");
+$deep_2 = $deep;
+make_deep("C", "Eb");
+$deep_3 = $deep;
+make_deep("A-", "Eb");
+$deep_4 = $deep;
+
+audio_zero($snare, $s);
+audio_zero($sh_snare, $s);
+audio_zero($tick, $s);
+
+audio_zero($tmp, $s);
+audio_noise($tmp, $s/4);
+audio_linear_env($tmp, 0, 1, 3 * $s/16, 0);
+audio_omni_drum($snare, 3 * $s/16, $sintbl, $s,  90, 30, 1, 1);
+audio_linear_env($snare, 0, 1, 3 * $s / 16, 0);
+audio_add($snare, 0, $tmp, 3 * $s /16);
+
+audio_zero($tmp, $s);
+audio_noise($tmp, $s/4);
+audio_linear_env($tmp, 0, 1, $s/8, 0);
+audio_omni_drum($sh_snare, $s/8, $sintbl, $s,  90, 30, 1, 1);
+audio_linear_env($sh_snare, 0, 1, $s /8, 0);
+audio_add($sh_snare, 0, $tmp, $s /8);
+
+audio_zero($tick, $s);
+audio_noise($tick, $s/16);
+audio_linear_env($tick, 0, 1, $s/16, 0);
+
+$loud_bass = $bass;
+audio_scale($loud_bass, $s, 2/3);
+audio_scale($bass, $s, 1/2);
+audio_scale($snare, $s, 1/8);
+audio_scale($sh_snare, $s, 1/8);
+audio_scale($tick, $s, 1/32);
+
+
+
+note($riff, 0, "F-", $m/8);
+note($riff, $m/8, "Bb-", $m/8);
+note($riff, $m/4, "G-", $m/8);
+note($riff, $m/4, "C", $m/8);
+
+audio_table_add($sound, $m, $riff, 3 * $m / 8, 1, 1);
+
+$sound_tmp = $sound;
+if ($frame <= 0) {
+  for (qw(C G- Bb-)) {
+    audio_zero($sound_tmp, $m);
+    note($sound_tmp, 0, $_, $m);
+    audio_play($sound_tmp, $m);
+  }
+  for (qw(F-)) {
+    audio_zero($sound_tmp, $m);
+    note($sound_tmp, $m * (1/2+1/8), "G-", $m/8);
+    note($sound_tmp, $m * (1/2+2/8), "Bb-", $m/8);
+    note($sound_tmp, $m * (1/2+3/8), "C", $m/8);
+    
+    note($sound_tmp, 0, $_, $m);
+    audio_play($sound_tmp, $m);
+  }
+}
+if ($frame <= 1) {
+  for (qw(C G- Bb-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    
+    audio_play($sound_tmp, $m);
+  }
+  for (qw(F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    @drum_line = (
+		  [4.000 => \$snare],
+		  [5.000 => \$snare],
+		  [6.000 => \$snare],
+	
+		  [7.000 => \$snare],
+	#	  [7.167 => \$snare],
+	       #  [7.333 => \$snare],
+		  [7.500 => \$snare],
+		 );
+    foreach(@drum_line) {
+      audio_add($sound_tmp, ($m/8) * $_->[0], ${$_->[1]}, $s);
+    }
+  audio_linear_env($sound_tmp, $m - $m/8000, 1, $m, 0);
+  audio_play($sound_tmp, $m);
+  }
+}
+$frame_1 = $sound; # save
+
+@drum_line = (
+	      [0.000 => \$bass],
+
+	      [1.000 => \$bass],
+	      [2.000 => \$snare],
+	      [3.000 => \$bass],  
+	      [4.000 => \$bass],
+
+	      [5.000 => \$snare],
+	      [6.000 => \$bass],
+	      [7.000 => \$bass], 
+);
+
+foreach(@drum_line) {
+  audio_add($sound, ($m/8) * $_->[0], ${$_->[1]}, $s);
+}
+audio_linear_env($sound, $m - $m/8000, 1, $m, 0);
+
+if ($frame <= 2) {
+  for (qw(C G- Bb-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    
+    audio_play($sound_tmp, $m);
+  }
+  for (qw(F-)) {	
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    @drum_line = (
+		  [5.000 => \$sh_snare],
+		  [7.000 => \$sh_snare],
+		  [7.500 => \$tick],
+		 );
+    
+    foreach(@drum_line) {
+      audio_add($sound_tmp, ($m/8) * $_->[0], ${$_->[1]}, $s);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+$frame_2 = $sound; # save
+
+@drum_line = (
+	      [3.000 => \$sh_snare],
+	      [3.500 => \$tick],
+	      [7.000 => \$sh_snare],
+	      [7.667 => \$tick],
+);
+
+foreach(@drum_line) {
+  audio_add($sound, ($m/8) * $_->[0], ${$_->[1]}, $s);
+}
+#audio_move($sound_tmp, 0, $sound, $m, $m);
+#audio_add($sound, 0, $sound_tmp, $m);
+if ($frame <= 3) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    
+    audio_play($sound_tmp, $m);
+  }
+}
+
+foreach(0..15) {
+  audio_add($sound, ($m * $_)/ 16, $tick, $s);
+}
+
+if ($frame <= 4) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    
+    audio_play($sound_tmp, $m);
+  }
+}
+$frame_4 = $sound; #save
+# audio_zero($sound, $m);
+@drum_line = (
+	      [1.000 => \$deep_2],
+	      [3.667 => \$tick],
+	      [2.000 => \$deep_1],
+	      [5.000 => \$deep_2],
+);
+
+foreach(@drum_line) {
+  audio_add($sound, ($m/8) * $_->[0], ${$_->[1]}, $s);
+}
+if ($frame <= 5) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    
+    audio_play($sound_tmp, $m);
+  }
+}
+
+@drum_line = (
+	      #[2.500 => \$deep_3],
+	      [3.500 => \$deep_3],
+	      #[4.500 => \$deep_3],
+	      [6.000 => \$deep_3],
+);
+
+foreach(@drum_line) {
+  audio_add($sound, ($m/8) * $_->[0], ${$_->[1]}, $s);
+}
+if ($frame <= 6) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+   
+    audio_play($sound_tmp, $m);
+  }
+}
+
+@drum_line = (
+	      [2.500 => \$deep_4],
+	      #[3.500 => \$deep_3],
+	      [4.500 => \$deep_4],
+	      #[6.000 => \$deep_3],
+);
+
+foreach(@drum_line) {
+  audio_add($sound, ($m/8) * $_->[0], ${$_->[1]}, $s);
+}
+if ($frame <= 7) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+   
+    audio_play($sound_tmp, $m);
+  }
+}
+$frame_7 = $sound; # save
+
+if ($frame <= 8) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    soft_note($sound_tmp, 0, "$_#######+", $m, 8000);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 9) {
+  for (qw(C G- Bb- F-)) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $_, $m);
+    soft_note($sound_tmp, 0, "$_++", $m, 8000);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+@m1 = qw(C  G- Bb- F-);
+@m2 = qw(G+ D++ Bb+ C++);
+if ($frame <= 10) {
+  for (0..3) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $m1[$_], $m);
+    soft_note($sound_tmp, 0, $m2[$_], $m, 8000);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+@m1 = qw(C  G- Bb- F-);
+@m2 = qw(G+ G+ F+ Eb+);
+if ($frame <= 11) {
+  for (0..2) {
+    my $sound_tmp = $sound;
+    note($sound_tmp, 0, $m1[$_], $m);
+    soft_note($sound_tmp, 0, $m2[$_], $m, 8000);
+    audio_play($sound_tmp, $m);
+  }
+  for (3) {
+    my $sound_tmp = $sound;
+    audio_linear_env($sound_tmp, 0, 1, $m/4, 0); # fade...
+    audio_linear_env($sound_tmp, $m/4, 0, $m, 0); # fade...
+    note($sound_tmp, 0, $m1[$_], $m);
+    soft_note($sound_tmp, 0, $m2[$_], $m, 8000);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 12) {
+  for (qw(C+ G Bb F)) {
+    my $sound_tmp = $frame_4;
+    note($sound_tmp, 0, $_, $m);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+
+if ($frame <= 13) {
+  for (qw(G D F C)) {
+    my $sound_tmp = $frame_2;
+    note($sound_tmp, 0, $_, $m);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 14) {
+  for (qw(C+)) {
+    my $sound_tmp = $frame_1;
+    distorted_note($sound_tmp, 0, $_, $m);
+    audio_play($sound_tmp, $m);
+  }
+  audio_play($frame_1, $m);
+  for (qw(C++)) {
+    my $sound_tmp = $frame_1;
+    distorted_note($sound_tmp, 0, $_, $m);
+    # here comes the crazy drumming shit:
+    @drum_line = (
+		  [4.500 => \$snare],
+		  [5.500 => \$snare],
+		  [6.000 => \$snare],
+		  [7.000 => \$sh_snare],
+		  [7.250 => \$sh_snare],
+		  [7.500 => \$sh_snare],
+		 );
+    foreach(@drum_line) {
+      audio_add($sound_tmp, ($m/8) * $_->[0], ${$_->[1]}, $s);
+    } 
+    audio_play($sound_tmp, $m);
+  }
+  my $alt_f1 = $frame_1;
+
+ 
+  @drum_line = (
+		[1.000 => \$loud_bass], [0.000 => \$snare],
+		[1.500 => \$bass],
+		[1.667 => \$tick],
+		[2.000 => \$snare],
+		[3.000 => \$loud_bass],
+		[3.500 => \$loud_bass],
+		[4.500 => \$bass],
+		[5.500 => \$snare],
+		[6.500 => \$bass],
+		[7.500 => \$snare],
+	       );
+  foreach(@drum_line) {
+    audio_add($alt_f1, ($m/8) * $_->[0], ${$_->[1]}, $s);
+  } 
+  foreach(1, 2, 4, 4.5, 5) {
+    audio_add($alt_f1, ($_ / 2 + 5) * $m/8, $sh_snare, $s);
+  }
+  foreach(0..7) {
+    audio_add($alt_f1, ($_ / 2 + 4) * $m/8, $tick, $s);
+  }
+  audio_play($alt_f1, $m);
+}
+if ($frame <= 15) {
+  for (qw(C G- Bb-)) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $_, $m);
+   
+    audio_play($sound_tmp, $m);
+  }
+  for (qw(F-)) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $_, $m);
+    @m2 = qw(F- F- x x x Eb- D- Bb--);
+    for $e (0..7) {
+      $m2[$e] !~ /x/ and
+	note($sound_tmp, $m * $e  / 8, $m2[$e]. "+", $m/8);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+
+@melody = (
+[qw(C- F- G- C C- G- Bb- F-)],
+[qw(G- C D G G- Bb- D C)],
+[qw(Bb- D F Bb Bb- Ab- G- Eb-)],
+[qw(F- G- C Eb F- Eb- D- Bb--)],
+);
+
+if ($frame <= 16) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      note($sound_tmp, $m * $e / 8, $melody[$_][$e]. "+", $m/8);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+if ($frame <= 17) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      double_note($sound_tmp, $m * $e / 8, $melody[$_][$e]. "+", $m/8);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 18) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      exp_note($sound_tmp, $m * $e / 8,       $melody[$_][$e]. "+", $m/16);
+      exp_note($sound_tmp, $m * ($e+1/2) / 8, $melody[$_][$e]. "++", $m/16);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 19) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      note($sound_tmp, $m * $e / 8,       $melody[$_][$e]. "+", $m/16);
+      note($sound_tmp, $m * ($e+1/2) / 8, $melody[$_][$e]. "+bbbbbbb", $m/16);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 20) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      note($sound_tmp, $m * $e / 8,       $melody[$_][$e]. "", $m/16);
+      note($sound_tmp, $m * ($e+1/2) / 8, $melody[$_][$e]. "##", $m/16);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+
+
+if ($frame <= 21) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      $e % 2 and
+	note($sound_tmp, $m * $e / 8,       $melody[$_][$e-1]. "+", $m/4);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 22) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    note($sound_tmp, 0, $m1[$_], $m);
+    for $e (0..7) {
+      $e % 2 and
+	note($sound_tmp, $m * $e / 8,       $melody[$_][$e]. "+", $m/4);
+    }
+    audio_play($sound_tmp, $m);
+  }
+}
+if ($frame <= 23) {
+ for (0..3) {
+    my $sound_tmp = $frame_7;
+    $_ == 0 and
+      distorted_note($sound_tmp, 0, "C+", $m);
+    note($sound_tmp, 0, $m1[$_], $m);
+    audio_play($sound_tmp, $m);
+  }
+}
+
+if ($frame <= 24) {
+ for (0..3) {
+   my $sound_tmp = $frame_7;
+   note($sound_tmp, 0, $m1[$_], $m);
+   $_ == 0 and
+     distorted_note($sound_tmp, 0, "C++", $m);
+   audio_linear_env($sound_tmp, 0, 1 - $_ /4, $m, 1 - ($_ + 1) /4);
+   audio_play($sound_tmp, $m);
+  }
+}
+audio_destroy(); 
+
+sub note {
+  my ($off, $which, $dur, $amp); 
+  (undef, $off, $which, $dur, $amp) = @_;
+  $amp = $amp || 8000;
+  my $tmp; # = " " x (2 * $dur);
+  audio_zero($tmp, $dur);
+  audio_osc_add($tmp, $dur, tone_of_string($which), $amp * 7/9);
+  audio_osc_add($tmp, $dur, 3 * tone_of_string($which), $amp / 9);
+  audio_osc_add($tmp, $dur, 4 * tone_of_string($which), $amp / 18);
+  audio_osc_add($tmp, $dur, 5 * tone_of_string($which), $amp / 18);
+  audio_linear_env($tmp, 0, 0, $dur / 40, 1);
+  audio_linear_env($tmp, $dur/40, 1, $dur - $dur/10, .75);
+  audio_linear_env($tmp, $dur - $dur/10, .75, $dur, 0);
+  my $dist = 4000;
+  audio_distort($tmp, $dur, $dist, $dist, 33000, $dist);
+  audio_distort($tmp, $dur, -33000, -$dist, -$dist, -$dist);
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+sub exp_note {
+  my ($off, $which, $dur, $amp); 
+  (undef, $off, $which, $dur, $amp) = @_;
+  $amp = $amp || 8000;
+  my $tmp; # = " " x (2 * $dur);
+  audio_zero($tmp, $dur);
+  audio_osc_add($tmp, $dur, tone_of_string($which), $amp * 7/9);
+# audio_osc_add($tmp, $dur, 3 * tone_of_string($which), $amp / 9);
+# audio_osc_add($tmp, $dur, 4 * tone_of_string($which), $amp / 18);
+  audio_osc_add($tmp, $dur, 5 * tone_of_string($which), $amp / 18);
+  audio_linear_env($tmp, 0, 0, $dur - $dur / 10, 1);
+  audio_linear_env($tmp, $dur - $dur/10, 1, $dur - $dur/10, .75);
+  audio_linear_env($tmp, $dur - $dur/10, .75, $dur, 0);
+  my $dist = 4000;
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+sub double_note {
+  my ($off, $which, $dur, $amp); 
+  (undef, $off, $which, $dur, $amp) = @_;
+  $amp = $amp || 8000;
+  my $tmp; # = " " x (2 * $dur);
+  audio_zero($tmp, $dur);
+  audio_osc_add($tmp, $dur, tone_of_string($which), $amp);
+
+  audio_linear_env($tmp, 0, 0, $dur/20, 1);
+  audio_linear_env($tmp, $dur/20, 1, $dur/2, 0);
+  audio_linear_env($tmp, $dur/2, 0, 11*$dur/20, 1);
+  audio_linear_env($tmp, 11*$dur/20, 1, $dur, 0);
+  my $dist = 4000;
+  audio_distort($tmp, $dur, $dist, $dist, 33000, $dist);
+  audio_distort($tmp, $dur, -33000, -$dist, -$dist, -$dist);
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+
+sub soft_note {
+  my ($off, $which, $dur, $amp); 
+  (undef, $off, $which, $dur, $amp) = @_;
+  my $tmp; # = " " x (2 * $dur);
+  $amp =  $amp || 8000;
+  audio_zero($tmp, $dur);
+  my @h = ( # Violinish sound
+	   1.000000000000000, 
+	   0.883333333333333, 
+	   0.783333333333333, 
+	   0.688888888888889, 
+	   0.594444444444444, 
+	   0.872222222222222, 
+	   0.455555555555556, 
+	  );
+  my $h = 0;
+  foreach(@h) {
+    $h++;
+    audio_osc_add($tmp, $dur, $h * tone_of_string($which), $_ * $amp / 8);
+  }
+  
+  audio_linear_env($tmp, 0, 0, $dur / 4 , 1);
+#  audio_linear_env($tmp, $dur/4, 1, $dur / 2 , 1);
+  audio_linear_env($tmp, $dur / 2, 1, $dur, 0);
+  my $dist = 3000;
+ # audio_distort($tmp, $dur, $dist, $dist, 33000, $dist);
+ # audio_distort($tmp, $dur, -33000, -$dist, -$dist, -$dist);
+  audio_add($_[0], $off, $tmp, $dur);
+}
+
+sub distorted_note {
+  my ($off, $which, $dur, $amp); 
+  (undef, $off, $which, $dur, $amp) = @_;
+  my $tmp; # = " " x (2 * $dur);
+  $amp =  $amp || 8000;
+  audio_zero($tmp, $dur); 
+
+  audio_osc_add($tmp, $dur, tone_of_string($which), $amp);
+  
+  audio_linear_env($tmp, 0, 0, $dur / 4 , 1);
+#  audio_linear_env($tmp, $dur/4, 1, $dur / 2 , 1);
+  audio_linear_env($tmp, $dur / 2, 1, $dur, 0);
+  my $dist = 3000;
+  audio_distort($tmp, $dur, $dist, $dist, 33000, $dist);
+  audio_distort($tmp, $dur, -33000, -$dist, -$dist, -$dist);
+  audio_add($_[0], $off, $tmp, $dur);
+}

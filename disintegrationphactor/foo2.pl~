@@ -1,0 +1,87 @@
+#!/usr/local/bin/perl5 -w -I../Solaris/Audio/blib/lib -I../Solaris/Audio/blib/arch
+use Solaris::Audio qw(:all);
+use Tk;
+require "disi.pl";
+
+###
+
+$mw = new MainWindow;
+$one = $mw->Frame(-width => 100, -height => 100, -bg => "white")->pack();
+
+$one->bind("Tk::Frame", "<Enter>", sub {shift->focus});
+$one->bind("<KeyPress>", [sub{$keymap{$_[1]}=2}, Ev('K')]);
+# $one->bind("<KeyRelease>", [sub{$keymap{$_[1]} = $keymap{$_[1]} ? 1 : 0}, Ev('K')]);
+# $two->bind("<1>", sub {print "Click\n"; handle_key()});
+%trans = (
+	  'z' => "C",
+	  's' => "C#",
+	  'x' => "D",
+	  'd' => "D#",
+	  'c' => "E",
+	  'v' => "F",
+	  "g" => "F#",
+	  'b' => "G",
+	  'h' => "G#",
+	  'n' => "A",
+	  'j' => "A#",
+	  'm' => "B",
+	  'comma' => "C+",
+	  'period' => "D+",
+	  
+);
+
+sub handle_key {
+  if ($block > 1) {
+    $mw->after(10, \&handle_key);
+    return;
+  }
+  audio_zero($sound, $s);
+  foreach (keys %keymap) {
+    next unless $keymap{$_};
+    next unless $trans{$_};
+    $keymap{$_} = 0;
+    audio_osc_add($sound, $s/8,int (tone_of_string($trans{$_})), 1000);
+  }
+  audio_linear_envs($sound, 0, 0, $s/80, 1, $s / 8 - $s/80, 1, $s/8, 0);
+  play($sound, $s / 8);
+  $mw->after(100, \&handle_key);
+}
+
+$mw->after(100, \&handle_key);
+
+
+###
+
+
+$direct = 1;
+$port = 2;
+$rate = 16000;
+$s = $rate;
+
+$SIG{POLL} = 'IGNORE';
+audio_init($direct);
+if ($direct) {
+  audio_set_rate($rate);
+  audio_set_port($port);
+  audio_set_gain(80);
+  audio_set_async() or die $!;
+}
+$block = 0;
+$SIG{POLL} = sub {$block = 0;};
+
+
+
+sub play {
+  &audio_play;
+  audio_play("", 0);
+  $block++;
+}
+
+sub destroy{
+  $SIG{POLL} = 'IGNORE';
+  audio_destroy();
+}
+
+MainLoop();
+
+destroy();

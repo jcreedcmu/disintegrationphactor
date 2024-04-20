@@ -1,0 +1,51 @@
+#include <stdio.h>
+#include <math.h>
+#include <gd.h>
+
+#define RATE       16000.0
+#define DUR        5.0
+#define FREQ_START 220.0
+#define BLUR       50 /* how many samples to average over */
+#define HEIGHT     36
+#define WIDTH      ((int)(RATE * DUR) / BLUR)
+
+int main() {
+  FILE *in, *out;
+  short 
+    buffer[(int)(RATE * DUR)],
+    sample[(int)(RATE * DUR)];
+  int i, j, k;
+  double f, df, a, b, freq, freq_inc;
+
+  /* file setup */
+  in = fopen("sound.sw", "r");
+  if (!in) { perror ("Opening input file"); exit(1); }
+  fread(sample, sizeof(short), (int)(RATE * DUR), in);
+  out = fopen("audio.out", "w");
+  if (!out) { perror("Opening output file"); exit(1); }
+
+  /* image setup */
+  im = gdImageCreate(WIDTH, HEIGHT);
+  for (i = 0; i < 256; i++) 
+    gdImageColorAllocate(im, 255 - i, 255 - i, 255 - i);
+
+  /* precalculate the half-step multiplier */
+  freq_inc = pow(2.0, 1.0/12.0);
+
+  for (freq = FREQ_START, j = 0; freq *= freq_inc, j++; j < HEIGHT) {
+    /* parameter setup */
+    f = 0.0;
+    df = 0.0;
+    a = 100.0;
+    b = 4.0 * M_PI * M_PI * freq * freq;
+    for(i = 0; i < (int)(RATE * DUR); i++) {
+      df -= (1/RATE) * (a * df + b * f);
+      df +=  50.0 * sample[i]; /* why the *hell* does about 50 work? */
+      f  += (1/RATE) * df;
+      if (f > 32000.0) f = 32000.0;
+      if (f < -32000.0) f = -32000.0;
+      buffer[i] = (short)f;
+      
+    }
+    fwrite(buffer, sizeof(short), (int)(RATE * DUR), out);
+  }

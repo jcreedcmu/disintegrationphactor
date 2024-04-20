@@ -1,0 +1,55 @@
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/conf.h>
+#include <sys/audioio.h>
+#include <fcntl.h>
+#include <math.h>
+#include <stropts.h>
+
+#define SOUND_SIZE 1000
+
+int main(void) {
+  int i, j, fd;
+  audio_info_t ainfo;
+  short sound[SOUND_SIZE];
+  double scale[12];
+
+  for(i=0; i< 12; i++) {
+    scale[i] = pow(2, i / 12.0);
+  }
+
+  fd = open("/dev/audio", O_WRONLY);
+  if (fd == -1) {
+    printf("Couldn't open /dev/audio\n");
+    return 1; 
+  }
+  else {
+    printf("Successfully opened /dev/audio on fd %d...\n", fd);
+  }
+  ioctl(fd, AUDIO_GETINFO, &ainfo);
+  ainfo.play.gain = 120;
+  ainfo.play.encoding = AUDIO_ENCODING_LINEAR;
+  ainfo.play.port = 1;
+  printf("Playing on port %d\n", ainfo.play.port);
+  ioctl(fd, AUDIO_SETINFO, &ainfo);
+  ioctl(fd, AUDIO_GETINFO, &ainfo);
+  printf("Sample rate, precision, encoding, channels: %d, %d, %d, %d\n", ainfo.play.sample_rate, ainfo.play.precision, ainfo.play.encoding, ainfo.play.channels);
+  
+  for(j=0; j<64; j++) {
+    for(i=0; i<SOUND_SIZE; i++) {
+      double omega = (2.0 * M_PI / 8000.0) * 220;
+      sound[i] = (short)(4000.0 * ((double)(SOUND_SIZE - i) / SOUND_SIZE)* (sin(omega * i) ));
+      if (j & 2)  sound[i] += 2000.0 * sin(scale[7] * omega * i); 
+      if (j & 4) sound[i] += 2000.0 * sin(2 * omega * i); 
+      if ((j & 8) & ~4)  sound[i] += 2000.0 * sin(scale[10] * omega * i); 
+      /* printf("%d ", sound[i]); */
+    }
+    if (write(fd, sound, SOUND_SIZE * sizeof(short)) == -1) {
+      printf("File number: %d\n", fd);
+      perror("Darn"); 
+    }
+  }
+  close(fd);
+  return 0;
+}

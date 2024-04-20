@@ -1,0 +1,47 @@
+#!/usr/local/bin/perl5 -ISolaris/Audio/blib/lib -ISolaris/Audio/blib/arch
+use Solaris::Audio qw(:all);
+use Tk;
+
+audio_init();
+open(IN, "sound") or die $!;
+{local $/; $sound = <IN>;}
+$| = 1;
+# audio_play($sound, 8000);
+#print "Starting drum...\n";
+
+#print "About to play...\n";
+#for (1..10) {audio_play($sound, 1000);}
+
+$mw = MainWindow->new();
+
+$f = $mw->Frame()->pack(-side => "top");
+
+$f->Scale(qw(-orient vertical -length 500 -from 0 -to 1000 
+-tickinterval 200 -label), "Base Frequency", -variable => \$base_freq)
+->pack(-side => "left");
+
+$f->Scale(qw(-orient vertical -length 500 -from 0 -to 200 
+-tickinterval 40 -label), "Frequency Range", -variable => \$range_freq)
+->pack(-side => "left");
+
+$f->Scale(qw(-orient vertical -length 500 -from 0 -to 32000 
+-tickinterval 6400 -label), "Amplitude", -variable => \$amp)
+->pack(-side => "left");
+
+$mw->Button(-background => 'bisque', -text => "Beat", -command => \&do_drum)->pack(-side => "bottom");
+
+MainLoop();
+audio_destroy();
+
+sub do_drum_old {
+audio_drum($sound, 8000, $base_freq, $range_freq, $amp);
+audio_scale($sound, 8000, 5);
+audio_play($sound, 8000);
+}
+
+sub do_drum {
+audio_zero($sound, 8000);
+audio_osc_add($sound, 8000, $base_freq, $amp);
+#audio_scale($sound, 8000, 5);
+audio_play($sound, 8000);
+}

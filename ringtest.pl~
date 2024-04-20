@@ -1,0 +1,8 @@
+#!/usr/bin/perl
+
+use Tk;
+
+$mw = MainWindow->new();
+
+$e = $mw->Entry(-textvariable => \$freq)->pack();
+$B = $mw->Button(-text => "Note", -command => \&make_note);

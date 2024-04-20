@@ -1,0 +1,109 @@
+#include <stdio.h>
+#include <fcntl.h>
+#include <gd.h>
+#include <math.h>
+
+#define MAX_L 1.0 /* m */
+#define NUM_PTS 7
+#define DL (MAX_L / (double)NUM_PTS) /* m */
+#define C 50.0 /* m / s */
+#define BETA -100.0 /* ?? */
+#define DT 0.001 /* s */
+#define MAX_T 0.018 /* s */
+
+typedef struct {
+  double x;
+  double xv;
+} pt;
+
+  pt wire[NUM_PTS];    
+  pt new_wire[NUM_PTS];
+
+#define HEIGHT 50
+
+ gdImagePtr im;
+
+void snapshot_init() {
+  int i;
+
+  im = gdImageCreate(NUM_PTS, HEIGHT);
+  /*
+  for (i = 0; i < 256; i++) {
+    gdImageColorAllocate(im, 255-i, 255-i, 255-i);
+  }
+  */
+  gdImageColorAllocate(im, 255, 255, 255);
+  gdImageColorAllocate(im, 0, 0, 0);
+  gdImageColorAllocate(im, 255, 0, 255);
+}
+
+void snapshot_update (pt wire[NUM_PTS]) {
+  int i;
+
+  for (i = 0; i < NUM_PTS; i++) {
+    printf("%f/%f\n", wire[i].x, wire[i].xv);
+    gdImageSetPixel(im,  i, ((1. - wire[i].x) / 2.) * HEIGHT, 1);
+    gdImageSetPixel(im,  i, ((1. - (wire[i].xv / (M_PI * C / MAX_L))) / 2. ) * HEIGHT, 2);
+  }
+}
+
+void snapshot_write() {
+  FILE *out;
+
+  out = fopen("m.gif", "wb");
+  if (!out) { perror("Opening output file"); exit(1); }
+  gdImageGif(im, out);
+  fclose(out);
+}
+
+int main(void) {
+
+  int i;
+  double t, L;
+  int fd;
+  
+  unlink("audio.out");
+  fd = open("audio.out", O_CREAT | O_RDWR, 0644);
+  if (fd == -1) {
+    printf("Couldn't open audio file\n");
+    exit(1);
+  }
+  srand();
+  snapshot_init();
+
+  for(i=0; i<NUM_PTS; i++) {
+    wire[i].x =  0;
+    wire[i].xv = (M_PI * C / MAX_L) * sin((M_PI * i) / (NUM_PTS - 1));
+  }
+  wire[0].x = 0.0;
+  wire[0].xv = 0.0;
+  wire[NUM_PTS - 1].x = 0.0;
+  wire[NUM_PTS - 1].xv = 0.0;
+
+  for(t = 0; t < MAX_T; t += DT) {
+    short frame;
+
+    /*    if (t % 100 == 0) printf("%f\n", wire[10].x);*/
+    /*    frame = (short)(32000.0 * wire[1].x); */
+    /*  if (t % 6 == 0)
+	write(fd, &frame,  sizeof(short)); */
+    printf("---\n");
+    for(i=1; i<NUM_PTS-1; i++) {
+      printf("%f %f %f:%f\n", wire[i-1].x, wire[i].x, wire[i+1].x, (DT * C * C / (DL * DL)) * (wire[i+1].x - wire[i].x)-(wire[i].x - wire[i-1].x));
+      new_wire[i].xv = wire[i].xv + (DT * C * C / (DL * DL)) * ((wire[i+1].x - wire[i].x)-(wire[i].x - wire[i-1].x));
+	/*	- (DT * BETA * wire[i].xv);*/
+      /*      new_wire[i].xv = wire[i].xv + (DT * C * C / (DL * DL)) * ((wire[i-1].x) + (wire[i+1].x) - (2. * (wire[i].x)));*/
+      /*   printf("new_wire[%d].xv = %f\n", i, new_wire[i].xv);*/
+      new_wire[i].x = wire[i].x + (DT * (wire[i].xv));
+    }
+    for(i=1; i<NUM_PTS-1; i++) {
+      wire[i].x = new_wire[i].x;
+      wire[i].xv = new_wire[i].xv;
+    }
+  }
+  printf("writing\n");
+  snapshot_update(wire);
+  snapshot_write();
+}
+
+

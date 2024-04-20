@@ -1,0 +1,347 @@
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/conf.h>
+#include <sys/audioio.h>
+#include <fcntl.h>
+#include <stropts.h>
+#include "math.h"
+#include "audio.h"
+
+#define ABS_MAX 32767
+#define min(x, y) ((x) < (y) ? (x) : (y))
+
+int fd, fdctl;
+int direct_audio;
+int enc_rate;
+
+double answer_lue() {
+ return 42.0;
+}
+
+int audio_init(int direct) {
+  direct_audio = direct;
+  enc_rate = 16000;
+ printf("%d\n", direct);
+  if (direct) {
+    audio_info_t ainfo;
+    
+    fd = open("/dev/audio", O_WRONLY);
+   
+    if (fd == -1) {
+      return 0; 
+    }
+    ioctl(fd, AUDIO_GETINFO, &ainfo);
+    ainfo.play.precision = 16;
+    ainfo.play.gain = 120;
+    ainfo.play.encoding = AUDIO_ENCODING_LINEAR;
+    ainfo.play.port = 1;
+    ainfo.play.sample_rate = 16000;
+    ioctl(fd, AUDIO_SETINFO, &ainfo);
+
+ 
+    return 1;
+  }
+  else {
+    fd = open("audio.out", O_CREAT | O_WRONLY);
+    if (fd == -1) {
+      return 0; 
+    }
+    return 1;
+  }
+}
+
+int audio_set_async() {
+  fdctl = open("/dev/audioctl", O_WRONLY);
+  if (fdctl == -1) {
+    printf("Arg!\n\n");
+    perror("Hrm.");
+    return 0;
+  }
+  ioctl(fdctl, I_SETSIG, S_MSG);
+  return 1;
+  /* close? */
+}
+
+void audio_set_port(int port) {
+  audio_info_t ainfo;
+  if (direct_audio) {	
+    ioctl(fd, AUDIO_GETINFO, &ainfo);
+    ainfo.play.port = port;
+    ioctl(fd, AUDIO_SETINFO, &ainfo);
+  }
+}
+
+void audio_set_rate(int rate) {
+  audio_info_t ainfo;
+  if (direct_audio) {
+    ioctl(fd, AUDIO_GETINFO, &ainfo);
+    ainfo.play.sample_rate = rate;
+    ioctl(fd, AUDIO_SETINFO, &ainfo);
+  }
+  enc_rate = rate;
+}
+
+void audio_set_gain(int gain) {
+  audio_info_t ainfo;
+  if (direct_audio) {
+    ioctl(fd, AUDIO_GETINFO, &ainfo);
+    ainfo.play.gain = gain;
+    ioctl(fd, AUDIO_SETINFO, &ainfo);
+  }
+}
+
+void audio_destroy() {
+  close(fd);
+}
+
+ssize_t audio_play(short *sound, int n) {
+  return (write(fd, sound, n * sizeof(short)));
+}
+
+void audio_drum(short *sound, int n, int base_freq, int range_freq, int amplitude) {
+  int i, j;
+  /*  audio_zero(sound, n);*/
+  for(j=0; j < range_freq; j++) { 
+    double inc = (2.0 * M_PI/ enc_rate) *  ((base_freq + j));
+    double phase = 0;
+    /*    printf("%f %f\n", inc, amplitude);*/
+    for (i=0; i< n; i++, phase += inc) {
+      sound[i] += ((((amplitude * sin(phase)) *(n - i)) / n)  / range_freq);
+    }
+  }
+}
+
+void audio_drum2(short *sound, int n, int base_freq, int range_freq, int amplitude) {
+  int i;
+  /*audio_zero(sound, n);*/
+  for(i=0; i < range_freq; i++)    
+    audio_osc_add(sound, n, base_freq + i, amplitude  / range_freq );
+}
+
+void audio_omni_drum(short *dst, int dstn, 
+		     short *src, int srcn, 
+		     int base_freq, int range_freq, 
+		     double step_freq, double amplitude) {
+  double i;
+  double each_amp = amplitude / ceil(range_freq / step_freq);
+
+  /*  audio_zero(dst, dstn);*/
+  for(i = base_freq; i<(base_freq + range_freq); i+= step_freq) {
+    audio_table_add(dst, dstn, src, srcn, i, each_amp);
+  }
+}
+
+void audio_scale(short *sound, int n, double k) {
+int i;
+
+  for(i=0; i<n; i++) {
+    double temp = sound[i] * k;
+    if (temp > ABS_MAX) temp = ABS_MAX;
+    else if (temp < -ABS_MAX) temp = -ABS_MAX;
+    sound[i] = temp;
+  }
+}
+
+void audio_osc_add(short *dst, int dstn, double frequency, double amplitude) {
+  int i;
+  float waveptr = 0;
+  float inc = (2.0 * M_PI/ enc_rate) *  frequency;
+  for(i=0; i<dstn; i++, waveptr += inc) {
+    dst[i] += (amplitude * sin(waveptr));
+  }
+}
+
+void audio_table_add(short *dst, int dstn, 
+		     short *src, int srcn, 
+		     double frequency, double amplitude) {
+  int i;
+  float srcptr = 0;
+  
+  if (frequency >= srcn) {
+    printf("audio_table_add giving up...(guru meditation: %f %d)\n", frequency, srcn);
+    return;
+  }
+
+  for(i=0; i<dstn; i++) {
+    dst[i] += (amplitude * src[(int)srcptr]);
+    srcptr += frequency;
+    if (srcptr >= srcn) {
+      srcptr -= srcn;
+    }
+  }
+}
+
+void audio_table_iadd(short *dst, int dstn, 
+		      short *src, int srcn, 
+		      double frequency, double amplitude) {
+  int i;
+  float srcptr = 0;
+  
+  if (frequency >= srcn) {
+    printf("audio_table_iadd giving up...(guru meditation: %f %d)\n", frequency, srcn);
+    return;
+  }
+
+  for(i=0; i<dstn; i++) {
+    double fpart;
+    fpart = srcptr - floor(srcptr);
+    dst[i] += amplitude * ((1-fpart) * src[(int)srcptr] + fpart * src[(int)srcptr + 1]);
+    srcptr += frequency;
+    if (srcptr >= srcn) {
+      srcptr -= srcn;
+    }
+  }
+}
+
+void audio_add(short *dst, int dstoff,
+               short *src, int srcn) {
+  int i;
+
+  for(i=0; i<srcn; i++) {
+    double temp = dst[dstoff + i] + src[i];
+    if (temp > ABS_MAX) temp = ABS_MAX;
+    else if (temp < -ABS_MAX) temp = -ABS_MAX;
+    dst[dstoff + i] = temp;
+  }
+
+}
+
+void audio_linear_env(short *sound, int x1, double y1, int x2, double y2) {
+  int i;
+  double scale, inc;
+
+  if (x1 == x2) 
+    return;
+
+  scale = y1;
+  inc = (y2-y1)/(x2-x1);
+
+  for (i=x1; i < x2; i++, scale += inc) {
+    sound[i] *= scale;  
+  }
+}
+
+void audio_exp_env(short *sound, int n, double halflife) {
+  int i;
+  double scale, inc;
+
+  scale = 1.0;
+  inc = exp(log(0.5) / halflife);
+
+  for (i=0; i < n; i++, scale *= inc) {
+    sound[i] *= scale;  
+  }
+}
+
+void audio_table_env(short *dst, int dstn, short *src, int srcn) {
+  int i;
+
+  for(i=0; i < min(dstn, srcn); i++) {
+    dst[i] *= (src[i] / (double)ABS_MAX);
+  }
+}
+
+void audio_noise(short *sound, int n) {
+  int i;
+
+  for(i=0; i<n; i++) {
+    sound[i] = rand();
+  }
+}
+
+void audio_distort(short *sound, int n,  int in1, int out1, int in2, int out2) {
+  int i;
+
+  double inc = (out2 - out1) / (in2 - in1);
+  double val = out1;
+  for(i = 0; i < n; i++) {
+    if (sound[i] >= in1 && sound[i] <= in2) {
+      sound[i] = out1 + (out2-out1) * (sound[i] - in1)/(double)(in2 - in1);
+    }
+  }
+}
+
+void audio_extract_add(short *dst, int dstn, short *src, int srcoff) {
+  int i;
+  
+  for(i=0; i<dstn; i++) {
+    double temp = dst[i] + src[i + srcoff];
+    if (temp > ABS_MAX) temp = ABS_MAX;
+    else if (temp < -ABS_MAX) temp = -ABS_MAX;
+    dst[i] = temp;
+  }
+}
+
+void audio_move(short *dst, int dstoff, short *src, int srcoff, int n) {
+  int i;
+  
+  for(i=0; i<n; i++) {
+    dst[i + dstoff] = src[i + srcoff];
+  }
+}
+
+void audio_flange(short *dst, int dstn, 
+		  short *src, int srcn,
+		  short *ctl, int ctln,
+		  double frequency, double amplitude) {
+  int i;
+  double ctlptr = 0;
+
+  if (frequency >= ctln) {
+    printf("audio_flange giving up...(guru meditation: %f %d)\n", frequency, srcn);
+    return;
+  }
+
+  for (i=0; i<dstn; i++) {
+    double srcptr = ((double)i + amplitude * ctl[(int)ctlptr]);
+    double fpart;
+    /*printf("%d %f %d * " ,i, amplitude, ctl[(int)ctlptr]);*/
+    if (srcptr < 0) 
+      srcptr = 0;
+    if (srcptr >= srcn - 1)
+      srcptr = srcn - 2;
+    /* printf("%f %f *  ", amplitude * ctl[(int)ctlptr], srcptr);*/
+    fpart = srcptr - floor(srcptr);
+    dst[i] += (1-fpart) * src[(int)srcptr] + fpart * src[(int)srcptr + 1];
+    ctlptr += frequency;
+    if (ctlptr >= ctln)
+      ctlptr -= ctln;
+  }
+}
+
+
+void audio_phase(short *dst, int dstn, 
+	         short *src, int srcn,
+	         short *ctl, int ctln,
+	         double frequency, double amplitude) {
+  int i;
+  double ctlptr = 0;
+double fpart, srcptr = 0;
+  if (frequency >= ctln) {
+    printf("audio_phase giving up, code A...(guru meditation: %f %d)\n", frequency, srcn);
+    return;
+  }
+
+  for (i=0; i<dstn; i++) {
+    
+
+    fpart = ctlptr - floor(ctlptr);
+    srcptr += amplitude * ((1-fpart) * ctl[(int)ctlptr] + fpart * ctl[(int)ctlptr + 1]);    
+    /*printf("%f ", ((1-fpart) * ctl[(int)ctlptr] + fpart * ctl[(int)ctlptr + 1])); */
+    if (srcptr < 0) 
+      srcptr = 0;
+    if (srcptr >= srcn - 1)
+      srcptr -= srcn;
+    if (srcptr >= srcn - 1) {
+      printf("audio_phase giving up, code B...(guru meditation: %f %d)\n", srcptr, srcn - 1);
+      return;
+    }
+
+    fpart = srcptr - floor(srcptr);
+    dst[i] += (1-fpart) * src[(int)srcptr] + fpart * src[(int)srcptr + 1];;
+    ctlptr += frequency;
+    if (ctlptr >= ctln)
+      ctlptr -= ctln;
+  }
+}
